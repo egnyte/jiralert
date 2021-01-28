@@ -78,10 +78,16 @@ func (r *Receiver) Notify(data *alertmanager.Data) (bool, error) {
 		return false, errors.Wrap(err, "generate summary from template")
 	}
 
+	// Consequenlty we want to update the description as well
+	issueDesc, err := r.tmpl.Execute(r.conf.Description, data)
+	if err != nil {
+		return false, errors.Wrap(err, "generate description from template")
+	}
+
 	if issue != nil {
-		// Update summary if needed.
-		if issue.Fields.Summary != issueSummary {
-			retry, err := r.updateSummary(issue.Key, issueSummary)
+		// Update summary and/or description if needed.
+		if issue.Fields.Summary != issueSummary || issue.Fields.Description != issueDesc {
+			retry, err := r.updateSummaryAndDescription(issue.Key, issueSummary,issueDesc)
 			if err != nil {
 				return retry, err
 			}
@@ -118,11 +124,6 @@ func (r *Receiver) Notify(data *alertmanager.Data) (bool, error) {
 	issueType, err := r.tmpl.Execute(r.conf.IssueType, data)
 	if err != nil {
 		return false, errors.Wrap(err, "render issue type")
-	}
-
-	issueDesc, err := r.tmpl.Execute(r.conf.Description, data)
-	if err != nil {
-		return false, errors.Wrap(err, "render issue description")
 	}
 
 	issue = &jira.Issue{
@@ -285,20 +286,21 @@ func (r *Receiver) findIssueToReuse(project string, issueGroupLabel string) (*ji
 	return issue, false, nil
 }
 
-func (r *Receiver) updateSummary(issueKey string, summary string) (bool, error) {
-	level.Debug(r.logger).Log("msg", "updating issue with new summary", "key", issueKey, "summary", summary)
+func (r *Receiver) updateSummaryAndDescription(issueKey string, summary string, description string) (bool, error) {
+	level.Debug(r.logger).Log("msg", "updating issue with new summary and description", "key", issueKey, "summary", summary, "description", description)
 
 	issueUpdate := &jira.Issue{
 		Key: issueKey,
 		Fields: &jira.IssueFields{
 			Summary: summary,
+			Description: description,
 		},
 	}
 	issue, resp, err := r.client.UpdateWithOptions(issueUpdate, nil)
 	if err != nil {
 		return handleJiraErrResponse("Issue.UpdateWithOptions", resp, err, r.logger)
 	}
-	level.Debug(r.logger).Log("msg", "issue summary updated", "key", issue.Key, "id", issue.ID)
+	level.Debug(r.logger).Log("msg", "issue summary and description updated", "key", issue.Key, "id", issue.ID)
 	return false, nil
 }
 

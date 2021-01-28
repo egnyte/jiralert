@@ -1,4 +1,4 @@
-module github.com/prometheus-community/jiralert
+module github.com/egnyte/jiralert
 
 go 1.14
 
@@ -9,6 +9,7 @@ require (
 	github.com/golang/protobuf v1.4.1 // indirect
 	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1
+	github.com/prometheus-community/jiralert v0.0.0-20200930145054-de4d3e7b6da6
 	github.com/prometheus/client_golang v1.6.0
 	github.com/prometheus/common v0.10.0 // indirect
 	github.com/stretchr/testify v1.5.1
