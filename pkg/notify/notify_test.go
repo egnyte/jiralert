@@ -22,10 +22,10 @@ import (
 
 	"github.com/trivago/tgo/tcontainer"
 
+	"github.com/egnyte/jiralert/pkg/config"
 	"github.com/go-kit/log"
 	"github.com/pkg/errors"
 	"github.com/prometheus-community/jiralert/pkg/alertmanager"
-	"github.com/prometheus-community/jiralert/pkg/config"
 	"github.com/prometheus-community/jiralert/pkg/template"
 	"github.com/stretchr/testify/require"
 )
@@ -55,6 +55,7 @@ func (f *fakeJira) Search(jql string, options *jira.SearchOptions) ([]jira.Issue
 	var issues []jira.Issue
 	for _, key := range f.keysByQuery[jql] {
 		issue := jira.Issue{Key: key, Fields: &jira.IssueFields{}}
+		issue.Fields.Unknowns = f.issuesByKey[key].Fields.Unknowns
 		for _, field := range options.Fields {
 			switch field {
 			case "summary":
@@ -129,6 +130,10 @@ func (f *fakeJira) UpdateWithOptions(old *jira.Issue, _ *jira.UpdateQueryOptions
 		issue.Fields.Description = old.Fields.Description
 	}
 
+	if old.Fields.Unknowns != nil {
+		issue.Fields.Unknowns = old.Fields.Unknowns
+	}
+
 	f.issuesByKey[issue.Key] = issue
 	return issue, nil, nil
 }
@@ -171,6 +176,21 @@ func testReceiverConfig2() *config.ReceiverConfig {
 		ReopenState:       "reopened",
 		Description:       `{{ .Alerts.Firing | len }}`,
 		WontFixResolution: "won't-fix",
+	}
+}
+
+func testReceiverConfig3() *config.ReceiverConfig {
+	reopen := config.Duration(1 * time.Hour)
+	return &config.ReceiverConfig{
+		Project:        "abc",
+		Summary:        `[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.SortedPairs.Values | join " " }} {{ if gt (len .CommonLabels) (len .GroupLabels) }}({{ with .CommonLabels.Remove .GroupLabels.Names }}{{ .Values | join " " }}{{ end }}){{ end }}`,
+		ReopenDuration: &reopen,
+		ReopenState:    "reopened",
+		Description:    `{{ .Alerts.Firing | len }}`,
+		Fields: tcontainer.MarshalMap(map[string]interface{}{
+			"customfield_25409": `{{ (index .Alerts 0).Annotations.AlertValue }}`,
+		}),
+		CustomFieldsToUpdate: []string{"customfield_25409"},
 	}
 }
 
@@ -306,6 +326,58 @@ func TestNotify_JIRAInteraction(t *testing.T) {
 							StatusCategory: jira.StatusCategory{Key: "NotDone"},
 						},
 						Unknowns:    tcontainer.MarshalMap{},
+						Summary:     "[FIRING:1] b d ", // Title changed.
+						Description: "1",
+					},
+				},
+			},
+		},
+		{
+			name:        "opened ticket, update value",
+			inputConfig: testReceiverConfig3(),
+			initJira: func(t *testing.T) *fakeJira {
+				f := newTestFakeJira()
+				_, _, err := f.Create(&jira.Issue{
+					ID:  "1",
+					Key: "1",
+					Fields: &jira.IssueFields{
+						Project: jira.Project{Key: testReceiverConfig3().Project},
+						Labels:  []string{"JIRALERT{819ba5ecba4ea5946a8d17d285cb23f3bb6862e08bb602ab08fd231cd8e1a83a1d095b0208a661787e9035f0541817634df5a994d1b5d4200d6c68a7663c97f5}"},
+						Unknowns: tcontainer.MarshalMap(map[string]interface{}{
+							"customfield_25409": "90",
+						}),
+						Summary:     "[FIRING:2] b d ",
+						Description: "First description before change",
+					},
+				})
+				require.NoError(t, err)
+				return f
+			},
+			inputAlert: &alertmanager.Data{
+				Alerts: alertmanager.Alerts{
+					{Status: alertmanager.AlertFiring,
+						Annotations: alertmanager.KV{
+							"AlertValue": "95",
+						},
+					}, // Only one firing now.
+					{Status: "not firing"},
+				},
+				Status:      alertmanager.AlertFiring,
+				GroupLabels: alertmanager.KV{"a": "b", "c": "d"},
+			},
+			expectedJiraIssues: map[string]*jira.Issue{
+				"1": {
+					ID:  "1",
+					Key: "1",
+					Fields: &jira.IssueFields{
+						Project: jira.Project{Key: testReceiverConfig3().Project},
+						Labels:  []string{"JIRALERT{819ba5ecba4ea5946a8d17d285cb23f3bb6862e08bb602ab08fd231cd8e1a83a1d095b0208a661787e9035f0541817634df5a994d1b5d4200d6c68a7663c97f5}"},
+						Status: &jira.Status{
+							StatusCategory: jira.StatusCategory{Key: "NotDone"},
+						},
+						Unknowns: tcontainer.MarshalMap{
+							"customfield_25409": "95",
+						},
 						Summary:     "[FIRING:1] b d ", // Title changed.
 						Description: "1",
 					},
