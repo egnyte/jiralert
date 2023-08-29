@@ -139,12 +139,15 @@ type ReceiverConfig struct {
 	ReopenDuration *Duration `yaml:"reopen_duration" json:"reopen_duration"`
 
 	// Optional issue fields
-	Priority          string                 `yaml:"priority" json:"priority"`
-	Description       string                 `yaml:"description" json:"description"`
-	WontFixResolution string                 `yaml:"wont_fix_resolution" json:"wont_fix_resolution"`
-	Fields            map[string]interface{} `yaml:"fields" json:"fields"`
-	Components        []string               `yaml:"components" json:"components"`
-	StaticLabels      []string               `yaml:"static_labels" json:"static_labels"`
+
+	Priority             string                 `yaml:"priority" json:"priority"`
+	Description          string                 `yaml:"description" json:"description"`
+	WontFixResolution    string                 `yaml:"wont_fix_resolution" json:"wont_fix_resolution"`
+	ReopenSkipStatus     []string               `yaml:"reopen_skip_status" json:"reopen_skip_status"`
+	Fields               map[string]interface{} `yaml:"fields" json:"fields"`
+	Components           []string               `yaml:"components" json:"components"`
+	StaticLabels         []string               `yaml:"static_labels" json:"static_labels"`
+	CustomFieldsToUpdate []string               `yaml:"update_always_fields" json:"update_always_fields"`
 
 	// Label copy settings
 	AddGroupLabels bool `yaml:"add_group_labels" json:"add_group_labels"`
@@ -292,6 +295,9 @@ func (c *Config) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		}
 		if rc.WontFixResolution == "" && c.Defaults.WontFixResolution != "" {
 			rc.WontFixResolution = c.Defaults.WontFixResolution
+		}
+		if rc.ReopenSkipStatus == nil && c.Defaults.ReopenSkipStatus != nil {
+			rc.ReopenSkipStatus = append(rc.ReopenSkipStatus, c.Defaults.ReopenSkipStatus...)
 		}
 		if rc.AutoResolve != nil {
 			if rc.AutoResolve.State == "" {

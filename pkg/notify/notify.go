@@ -23,11 +23,11 @@ import (
 	"time"
 
 	"github.com/andygrunwald/go-jira"
+	"github.com/egnyte/jiralert/pkg/config"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus-community/jiralert/pkg/alertmanager"
-	"github.com/prometheus-community/jiralert/pkg/config"
 	"github.com/prometheus-community/jiralert/pkg/template"
 	"github.com/trivago/tgo/tcontainer"
 )
@@ -59,6 +59,8 @@ func NewReceiver(logger log.Logger, c *config.ReceiverConfig, t *template.Templa
 	return &Receiver{logger: logger, conf: c, tmpl: t, client: client, timeNow: time.Now}
 }
 
+//var CustomFields = []string{"customfield_25409","customfield_25207"}
+
 // Notify manages JIRA issues based on alertmanager webhook notify message.
 func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool, updateSummary bool, updateDescription bool, reopenTickets bool) (bool, error) {
 	project, err := r.tmpl.Execute(r.conf.Project, data)
@@ -85,6 +87,18 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool, updateSum
 		return false, errors.Wrap(err, "render issue description")
 	}
 
+	issueCustomFields := tcontainer.NewMarshalMap()
+
+	for _, field := range r.conf.CustomFieldsToUpdate {
+		_, ok := r.conf.Fields[field]
+		if ok {
+			issueCustomFields[field], err = deepCopyWithTemplate(r.conf.Fields[field], r.tmpl, data)
+			if err != nil {
+				return false, errors.Wrap(err, "render issue fields")
+			}
+		}
+	}
+
 	if issue != nil {
 
 		// Update summary if needed.
@@ -103,6 +117,24 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool, updateSum
 				retry, err := r.updateDescription(issue.Key, issueDesc)
 				if err != nil {
 					return retry, err
+				}
+			}
+		}
+
+		// For specified custom fields update jira if value has changed
+
+		for CustomField := range issueCustomFields {
+			if _, ok := issue.Fields.Unknowns[CustomField]; ok {
+				if issue.Fields.Unknowns[CustomField] != issueCustomFields[CustomField] {
+					retry, err = r.updateUnknownFields(issue.Key, tcontainer.MarshalMap(map[string]interface{}{
+						CustomField: issueCustomFields[CustomField],
+					}))
+					if err != nil {
+						return retry, err
+					}
+				}
+				if err != nil {
+					return false, err
 				}
 			}
 		}
@@ -134,6 +166,12 @@ func (r *Receiver) Notify(data *alertmanager.Data, hashJiraLabel bool, updateSum
 				return false, nil
 			}
 
+			for _, allowed := range r.conf.ReopenSkipStatus{
+				if issue.Fields.Status.Name == allowed {
+					level.Info(r.logger).Log("msg", "issue has an allowed status, skip reopening", "key", issue.Key, "label", issueGroupLabel, "allowed status", allowed)
+					return false, nil
+				}
+			}
 			level.Info(r.logger).Log("msg", "issue was recently resolved, reopening", "key", issue.Key, "label", issueGroupLabel)
 			return r.reopen(issue.Key)
 		}
@@ -286,7 +324,7 @@ func toGroupTicketLabel(groupLabels alertmanager.KV, hashJiraLabel bool) string 
 func (r *Receiver) search(project, issueLabel string) (*jira.Issue, bool, error) {
 	query := fmt.Sprintf("project=\"%s\" and labels=%q order by resolutiondate desc", project, issueLabel)
 	options := &jira.SearchOptions{
-		Fields:     []string{"summary", "status", "resolution", "resolutiondate"},
+		Fields:     append([]string{"summary", "status", "resolution", "resolutiondate"}, r.conf.CustomFieldsToUpdate...),
 		MaxResults: 2,
 	}
 
@@ -362,6 +400,22 @@ func (r *Receiver) updateDescription(issueKey string, description string) (bool,
 		return handleJiraErrResponse("Issue.UpdateWithOptions", resp, err, r.logger)
 	}
 	level.Debug(r.logger).Log("msg", "issue summary updated", "key", issue.Key, "id", issue.ID)
+	return false, nil
+}
+
+func (r *Receiver) updateUnknownFields(issueKey string, unknowns tcontainer.MarshalMap) (bool, error) {
+	level.Debug(r.logger).Log("msg", "updating issue with unknown fields", "key", issueKey, "unknowns", unknowns)
+
+	issueUpdate := &jira.Issue{
+		Key: issueKey,
+		Fields: &jira.IssueFields{
+			Unknowns: unknowns,
+		},
+	}
+	_, resp, err := r.client.UpdateWithOptions(issueUpdate, nil)
+	if err != nil {
+		return handleJiraErrResponse("Issue.UpdateWithOptions", resp, err, r.logger)
+	}
 	return false, nil
 }
 
