@@ -127,6 +127,7 @@ type receiverTestConfig struct {
 	Priority          string   `yaml:"priority,omitempty"`
 	Description       string   `yaml:"description,omitempty"`
 	WontFixResolution string   `yaml:"wont_fix_resolution,omitempty"`
+	ReopenSkipStatus  []string `yaml:"reopen_skip_status" json:"reopen_skip_status"`
 	AddGroupLabels    bool     `yaml:"add_group_labels,omitempty"`
 	StaticLabels      []string `yaml:"static_labels" json:"static_labels"`
 
@@ -329,11 +330,12 @@ func TestReceiverOverrides(t *testing.T) {
 		{"Priority", "Critical", "Critical"},
 		{"Description", "A nice description", "A nice description"},
 		{"WontFixResolution", "Won't Fix", "Won't Fix"},
+		{"ReopenSkipStatus",[]string{"In Progress"},[]string{"In Progress"}},
 		{"AddGroupLabels", false, false},
 		{"AutoResolve", &AutoResolve{State: "Done"}, &autoResolve},
 		{"StaticLabels", []string{"somelabel"}, []string{"somelabel"}},
 	} {
-		optionalFields := []string{"Priority", "Description", "WontFixResolution", "AddGroupLabels", "AutoResolve", "StaticLabels"}
+		optionalFields := []string{"Priority", "Description", "WontFixResolution", "ReopenSkipStatus", "AddGroupLabels", "AutoResolve", "StaticLabels"}
 		defaultsConfig := newReceiverTestConfig(mandatoryReceiverFields(), optionalFields)
 		receiverConfig := newReceiverTestConfig([]string{"Name"}, optionalFields)
 
@@ -388,6 +390,8 @@ func newReceiverTestConfig(mandatory []string, optional []string) *receiverTestC
 		} else if name == "AutoResolve" {
 			value = reflect.ValueOf(&AutoResolve{State: "Done"})
 		} else if name == "StaticLabels" {
+			value = reflect.ValueOf([]string{})
+		} else if name == "ReopenSkipStatus" {
 			value = reflect.ValueOf([]string{})
 		} else {
 			value = reflect.ValueOf(name)
